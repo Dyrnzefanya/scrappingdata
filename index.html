@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Google Maps Business Finder → CSV</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-4 md:p-6">
+  <div class="max-w-5xl mx-auto">
+    <div class="bg-white rounded-2xl shadow-2xl p-6 md:p-8">
+      <div class="flex items-center gap-3 mb-6">
+        <div class="bg-gradient-to-br from-indigo-500 to-purple-600 p-3 rounded-xl text-white font-bold">
+          📍
+        </div>
+        <div>
+          <h1 class="text-2xl md:text-3xl font-bold text-gray-800">Google Places → Export CSV</h1>
+          <p class="text-sm text-gray-500">Aman untuk GitHub Pages (pakai proxy serverless)</p>
+        </div>
+      </div>
+
+      <div class="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-5 mb-6 text-white">
+        <p class="font-semibold mb-2">📊 Data yang diambil:</p>
+        <ul class="text-sm space-y-1 opacity-90">
+          <li>✓ Nama</li>
+          <li>✓ Alamat</li>
+          <li>✓ Rating</li>
+          <li>✓ Telepon (jika ada)</li>
+          <li>✓ Jam buka (jika ada)</li>
+          <li>✓ Link Google Maps</li>
+        </ul>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-2">Keyword / Jenis Bisnis</label>
+          <input id="keyword" class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none transition"
+                 placeholder="Contoh: Kafe, Restoran Padang, Salon" />
+        </div>
+
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-2">Lokasi Spesifik</label>
+          <input id="location" class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none transition"
+                 placeholder="Contoh: Jakarta Timur, Surabaya Pusat" />
+        </div>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-4 mb-6">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-2">Limit hasil</label>
+          <input id="limit" type="number" min="1" max="60" value="20"
+                 class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none transition" />
+        </div>
+
+        <div class="md:col-span-2 flex items-end gap-3">
+          <button id="btnSearch"
+                  class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-4 rounded-lg font-semibold hover:from-indigo-700 hover:to-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl">
+            🔎 Cari Data
+          </button>
+          <button id="btnCSV"
+                  class="w-full bg-green-600 text-white py-4 rounded-lg font-semibold hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl"
+                  disabled>
+            ⬇️ Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div id="error" class="hidden bg-red-50 border-l-4 border-red-400 p-4 mb-6 rounded">
+        <p class="text-red-700 text-sm font-medium" id="errorText"></p>
+      </div>
+
+      <div id="status" class="hidden bg-blue-50 border-l-4 border-blue-400 p-4 mb-6 rounded">
+        <p class="text-blue-800 text-sm font-medium" id="statusText"></p>
+      </div>
+
+      <div id="resultWrap" class="space-y-3"></div>
+    </div>
+
+    <div class="text-center mt-6 bg-white rounded-lg p-4 shadow">
+      <p class="text-sm text-gray-600">
+        💡 Tips: keyword spesifik = hasil lebih rapi (contoh: “Kafe Aesthetic”, “Bengkel Motor”, “Florist”)
+      </p>
+    </div>
+  </div>
+
+<script>
+  const WORKER_URL = "YOUR_WORKER_URL"; // contoh: https://places-proxy.nama-worker.workers.dev
+
+  let results = [];
+
+  const elKeyword = document.getElementById("keyword");
+  const elLocation = document.getElementById("location");
+  const elLimit = document.getElementById("limit");
+  const btnSearch = document.getElementById("btnSearch");
+  const btnCSV = document.getElementById("btnCSV");
+
+  const errorBox = document.getElementById("error");
+  const errorText = document.getElementById("errorText");
+  const statusBox = document.getElementById("status");
+  const statusText = document.getElementById("statusText");
+  const resultWrap = document.getElementById("resultWrap");
+
+  function showError(msg) {
+    errorText.textContent = msg;
+    errorBox.classList.remove("hidden");
+  }
+  function clearError() {
+    errorText.textContent = "";
+    errorBox.classList.add("hidden");
+  }
+  function showStatus(msg) {
+    statusText.textContent = msg;
+    statusBox.classList.remove("hidden");
+  }
+  function hideStatus() {
+    statusText.textContent = "";
+    statusBox.classList.add("hidden");
+  }
+
+  function escapeHtml(s="") {
+    return String(s).replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
+  }
+
+  function renderResults(list) {
+    resultWrap.innerHTML = "";
+    if (!list.length) return;
+
+    list.forEach((r, idx) => {
+      const card = document.createElement("div");
+      card.className = "bg-gradient-to-r from-white to-gray-50 border-2 border-gray-200 rounded-xl p-5 hover:shadow-lg transition";
+      card.innerHTML = `
+        <div class="flex justify-between items-start mb-3">
+          <div class="flex items-start gap-3">
+            <div class="bg-indigo-100 text-indigo-700 rounded-lg px-3 py-1 text-sm font-bold">#${idx+1}</div>
+            <div>
+              <h3 class="text-lg font-bold text-gray-900 mb-1">${escapeHtml(r.nama || "Tidak tersedia")}</h3>
+              ${r.rating ? `
+                <div class="text-sm text-gray-700">
+                  ⭐ <span class="font-semibold">${escapeHtml(r.rating)}</span> / 5.0
+                </div>` : ``}
+            </div>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4 text-sm">
+          <div class="space-y-2">
+            <div>
+              <p class="font-semibold text-gray-700">Alamat:</p>
+              <p class="text-gray-600">${escapeHtml(r.alamat || "Tidak tersedia")}</p>
+            </div>
+            <div>
+              <p class="font-semibold text-gray-700">Telepon:</p>
+              <p class="text-gray-600">${escapeHtml(r.telepon || "Tidak tersedia")}</p>
+            </div>
+          </div>
+
+          <div class="space-y-2">
+            <div>
+              <p class="font-semibold text-gray-700">Jam Buka:</p>
+              <p class="text-gray-600">${escapeHtml(r.jam_buka || "Tidak tersedia")}</p>
+            </div>
+            ${r.link ? `
+              <div>
+                <p class="font-semibold text-gray-700">Link:</p>
+                <a class="text-blue-600 hover:text-blue-800 underline break-all"
+                   href="${escapeHtml(r.link)}" target="_blank" rel="noopener noreferrer">Buka di Google Maps</a>
+              </div>` : ``}
+          </div>
+        </div>
+      `;
+      resultWrap.appendChild(card);
+    });
+  }
+
+  function toCSV(rows) {
+    const headers = ["Nama","Alamat","Rating","Telepon","Jam Buka","Link Google Maps"];
+    const esc = (v) => {
+      const s = (v ?? "").toString().replace(/\r?\n/g, " "); // rapihin newline biar CSV rapi
+      return `"${s.replace(/"/g, '""')}"`;
+    };
+    const lines = [
+      headers.map(esc).join(","),
+      ...rows.map(r => [
+        esc(r.nama),
+        esc(r.alamat),
+        esc(r.rating),
+        esc(r.telepon),
+        esc(r.jam_buka),
+        esc(r.link),
+      ].join(","))
+    ];
+    return "\uFEFF" + lines.join("\n"); // BOM biar Excel Indonesia kebaca
+  }
+
+  function downloadCSV() {
+    if (!results.length) return;
+
+    const csv = toCSV(results);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const a = document.createElement("a");
+    const file = `${(elKeyword.value||"keyword").trim()}_${(elLocation.value||"lokasi").trim()}_${new Date().toISOString().slice(0,10)}.csv`
+      .replace(/[^\w\-\.]+/g, "_");
+    a.href = URL.createObjectURL(blob);
+    a.download = file;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  async function searchPlaces() {
+    clearError();
+    hideStatus();
+    results = [];
+    renderResults([]);
+
+    const keyword = elKeyword.value.trim();
+    const location = elLocation.value.trim();
+    const limit = Math.max(1, Math.min(60, parseInt(elLimit.value || "20", 10)));
+
+    if (!keyword || !location) {
+      showError("Keyword dan lokasi harus diisi!");
+      return;
+    }
+    if (!WORKER_URL || WORKER_URL.includes("YOUR_WORKER_URL")) {
+      showError("WORKER_URL belum diisi. Deploy Cloudflare Worker dulu, lalu tempel URL-nya di index.html.");
+      return;
+    }
+
+    btnSearch.disabled = true;
+    btnCSV.disabled = true;
+    showStatus("Mengambil data...");
+
+    try {
+      const q = `${keyword} di ${location}`;
+      const res = await fetch(`${WORKER_URL}/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`Proxy error (${res.status}): ${txt}`);
+      }
+
+      const data = await res.json();
+      if (!Array.isArray(data) || !data.length) {
+        showError("Tidak ada hasil. Coba keyword/lokasi lain.");
+        return;
+      }
+
+      // hapus duplikat by nama (case-insensitive)
+      const map = new Map();
+      for (const item of data) {
+        const key = (item.nama || "").toLowerCase().trim();
+        if (!key) continue;
+        if (!map.has(key)) map.set(key, item);
+      }
+      results = Array.from(map.values());
+
+      renderResults(results);
+      btnCSV.disabled = results.length === 0;
+      showStatus(`Selesai. Dapat ${results.length} hasil.`);
+      setTimeout(hideStatus, 2500);
+
+    } catch (e) {
+      showError("Gagal mengambil data: " + (e?.message || String(e)));
+    } finally {
+      btnSearch.disabled = false;
+    }
+  }
+
+  btnSearch.addEventListener("click", searchPlaces);
+  btnCSV.addEventListener("click", downloadCSV);
+</script>
+</body>
+</html>
